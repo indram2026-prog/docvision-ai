@@ -1,0 +1,14 @@
+[
+ {
+  "condition": "blur",
+  "seed": 1003,
+  "type": "heading",
+  "bbox": [
+   110,
+   561,
+   314,
+   587
+  ],
+  "kind": "FN"
+ }
+]
