@@ -1,3 +1,13 @@
+---
+title: DocVision AI
+emoji: 📄
+colorFrom: indigo
+colorTo: blue
+sdk: docker
+app_port: 8000
+pinned: false
+---
+
 # DocVision AI — Intelligent Document Structure Understanding
 
 Challenge 9, AI Innovation Hackathon 2026. Treats a document as a **structured visual object** (layout + text + tables + forms + hierarchy) instead of a bag of OCR text. CPU-only, no GPU, no model downloads required for the core path.
