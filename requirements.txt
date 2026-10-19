@@ -1,0 +1,15 @@
+numpy
+opencv-python-headless
+Pillow
+pytesseract
+pdfplumber
+pypdfium2
+scipy
+fastapi
+uvicorn[standard]
+python-multipart
+# optional neural backends (docvision/neural.py YOLO layout, docvision/neural_forms.py LayoutLMv3)
+# ultralytics
+# huggingface_hub
+# torch
+# transformers

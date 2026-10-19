@@ -1,0 +1,8 @@
+# Run the whole app locally (or on any server with Docker):  docker compose up --build
+# Then open http://localhost:8000
+services:
+  docvision:
+    build: .
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
