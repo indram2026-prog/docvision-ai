@@ -120,7 +120,7 @@ def run_doclaynet(ann, img_dir, n, arms, out, seed=0, width=1240):
                 raise SystemExit(f"unknown arm {a}")
             time_[a] += time.time() - t0
             for e in page.elements:                 # list_item is a paragraph in DocLayNet's taxonomy
-                if e.type == "list_item":
+                if e.type in ("list_item", "code"):
                     e.type = "paragraph"
             # regions the benchmark does not score (page header/footer, formula) must not count as false positives
             page.elements = [e for e in page.elements if not any(iou(e.bbox, g) >= 0.5 for g in ignored)]

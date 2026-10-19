@@ -28,6 +28,8 @@ def to_markdown(doc: Document) -> str:
                 out.append(f"## {e.text}")
             elif e.type == "paragraph":
                 out.append(e.text)
+            elif e.type == "code":
+                out.append("```\n" + e.text + "\n```")
             elif e.type == "list_item":
                 out.append(f"- {e.text}")
             elif e.type == "table":

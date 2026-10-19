@@ -2,7 +2,7 @@
 from PIL import Image, ImageDraw, ImageFont
 
 COLORS = {"title": (214, 39, 40), "heading": (255, 127, 14), "paragraph": (31, 119, 180),
-          "table": (44, 160, 44), "figure": (148, 103, 189), "form_field": (227, 119, 194), "list_item": (23, 190, 207)}
+          "table": (44, 160, 44), "figure": (148, 103, 189), "form_field": (227, 119, 194), "list_item": (23, 190, 207), "code": (107, 79, 187)}
 
 
 def draw(img: Image.Image, page, show_cells=True) -> Image.Image:

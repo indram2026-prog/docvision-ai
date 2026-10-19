@@ -3,7 +3,7 @@ import React from "react";
 // Okabe-Ito based: distinguishable under common colour-vision deficiencies. `ink` is the label text colour.
 export const COLORS = {
   title: "#c0392b", heading: "#b36b00", paragraph: "#1f6fb2", table: "#0b8457",
-  figure: "#a8326e", form_field: "#00798c", list_item: "#5b5f66",
+  figure: "#a8326e", form_field: "#00798c", list_item: "#5b5f66", code: "#6b4fbb",
 };
 export const CLASS_HELP = {
   title: "Document title: largest type on the page",
@@ -13,6 +13,7 @@ export const CLASS_HELP = {
   figure: "Picture, chart or diagram",
   form_field: "A label with its filled-in value",
   list_item: "One bullet or numbered item",
+  code: "Source code or a monospaced listing",
 };
 
 export default function PageViewer({ title, img, page, selected, onSelect, muted, status }) {

@@ -57,13 +57,13 @@ def pdf_consistency(pdf, pages=(1, 12), dpi=150):
         if no not in pages or native is None:
             continue
         ref = process_image(pil, no, native_words=native)
-        gt = {"elements": [{"type": e.type if e.type != "list_item" else "paragraph", "bbox": list(e.bbox), "text": e.text or ""}
+        gt = {"elements": [{"type": e.type if e.type not in ("list_item", "code") else "paragraph", "bbox": list(e.bbox), "text": e.text or ""}
                            for e in sorted(ref.elements, key=lambda e: e.order)],
               "tables": [{"cells": e.cells} for e in ref.elements if e.type == "table"],
               "forms": [{"key": e.key, "value": e.value} for e in ref.elements if e.type == "form_field"]}
         hyp = process_image(pil, no)
         for e in hyp.elements:
-            if e.type == "list_item":
+            if e.type in ("list_item", "code"):
                 e.type = "paragraph"
         s = score_page(hyp, gt); S.append(s)
         rows.append({"page": no + 1, "errors": s["errors"], "page_cer": round(s["page_cer"], 4)})

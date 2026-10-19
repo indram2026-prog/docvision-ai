@@ -106,6 +106,13 @@ def process_image(img, page_no=0, native_words=None, use_tables=True, use_figure
     for (bb, cf) in figs:
         els.append(Element(type="figure", bbox=bb, page=page_no, conf=cf, source="density-saturation"))
 
+    # first page: the topmost centred heading in the top quarter is the document title
+    if page_no == 0 and not any(e.type == "title" for e in els):
+        top = min((e for e in els if e.type in ("heading", "paragraph")), key=lambda e: e.bbox[1], default=None)
+        if (top is not None and top.type == "heading" and top.bbox[3] < 0.25 * H
+                and abs((top.bbox[0] + top.bbox[2]) / 2 - W / 2) < 0.08 * W):
+            top.type, top.level = "title", 1
+
     for e in els:
         if e.type == "form_field":
             e.value_type = type_value(e.value or "", e.key or "")

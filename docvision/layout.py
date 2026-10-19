@@ -9,6 +9,12 @@ from .schema import Element, Line, union
 BULLET_RE = re.compile(r"^\s*(?:[•▪◦●■\-–—*]|\(?\d{1,2}[.)]|\(?[a-z][.)])\s+(\S.*)$")
 BULLET_ONLY = re.compile(r"^\s*[•▪◦●■*]\s*$")
 FORM_RE = re.compile(r"^\s*([A-Za-z][A-Za-z0-9 .\/#&-]{0,28}?)\s*:\s*(.*)$")
+# run-in label followed by a list marker on the same row:  "Aim: 1. To blink ..."
+RUNIN_RE = re.compile(r"^\s*([A-Z][A-Za-z0-9 ./&-]{0,28}?:)\s+(?=(?:\d{1,2}[.)]|[•▪◦●■\-–—*])\s)")
+# source-code lines (comments, statements, braces, declarations, control flow)
+CODE_RE = re.compile(r"^\s*(?://|/\*|\*/|#include\b|#define\b)|[;{}]\s*(?://.*)?$"
+                     r"|^\s*(?:void|int|const|float|char|byte|bool|long|unsigned|static)\s+\w+"
+                     r"|^\s*(?:if|for|while|switch)\s*\(|^\s*else\s*(?:\{|$)")
 
 
 def _runs(profile: np.ndarray, thr: float):
@@ -119,6 +125,16 @@ def detect_figures(rgb, exclude, min_w=110, min_h=80):
             continue
         dens = core[y:y + h, x:x + w].mean()   # dark-core density: blur halos don't inflate it
         satf = (sat[y:y + h, x:x + w] > 60).mean()
+        g = gray[y:y + h, x:x + w]
+        # screenshot / diagram panel: a large flat light-grey (not white) fill; text blocks are white with dark strokes
+        panel = float(((g >= 200) & (g <= 246)).mean()) if (w >= 250 and h >= 120) else 0.0
+        if panel >= 0.5:
+            fill = ((g >= 200) & (g <= 246)).astype(np.float32)
+            rows = np.where(fill.mean(1) >= 0.5)[0]; cols = np.where(fill.mean(0) >= 0.5)[0]
+            if rows.size and cols.size:        # drop caption lines the closing step glued onto the panel
+                x, y, w, h = x + int(cols[0]), y + int(rows[0]), int(cols[-1] - cols[0] + 1), int(rows[-1] - rows[0] + 1)
+            out.append(((int(x), int(y), int(x + w), int(y + h)), float(min(1.0, 0.6 + panel / 2))))
+            continue
         if dens >= 0.35 or satf >= 0.08:
             out.append(((int(x), int(y), int(x + w), int(y + h)), float(min(1.0, max(dens, satf * 3)))))
     return sorted(out, key=lambda t: t[0][1])
@@ -154,26 +170,57 @@ def merge_bullets(lines):
     return out
 
 
+def split_runin(lines):
+    """'Aim: 1. To blink...' is a label plus the first list item on one row: cut it into two lines."""
+    from .ocr import make_line
+    out = []
+    for l in lines:
+        m = RUNIN_RE.match(l.text)
+        if m and len(l.words) > 2:
+            label = m.group(1).strip()
+            for i in range(1, len(l.words)):
+                if " ".join(w.text for w in l.words[:i]) == label:
+                    out += [make_line(l.words[:i]), make_line(l.words[i:])]
+                    break
+            else:
+                out.append(l)
+        else:
+            out.append(l)
+    return out
+
+
 def classify_lines(lines, ul_boxes):
-    """Return list of (line, kind, extra) with kind in title/heading/text/form/list."""
+    """Return list of (line, kind, extra) with kind in title/heading/text/form/list/code/cont."""
     if not lines:
         return []
-    lines = merge_bullets(lines)
+    lines = split_runin(merge_bullets(lines))
     body_h = float(np.median([l.bbox[3] - l.bbox[1] for l in lines]))
     long_lines = [l for l in lines if len(l.text) >= 25] or lines
     body_cw = float(np.median([_char_w(l) for l in long_lines]))
     bold_frac = sum(l.bold for l in lines) / len(lines)
     res = []
+    tl = float(np.percentile([l.bbox[0] for l in long_lines], 10))
+    tr = float(np.percentile([l.bbox[2] for l in long_lines], 90))
+    prev = None                                   # (line, kind) of the previous classified line
     for l in lines:
         ul = next((u for u in ul_boxes
                    if l.bbox[3] - 8 <= u[1] <= l.bbox[3] + 26 and u[0] < l.bbox[2] and u[2] > l.bbox[0]), None)
         lm = BULLET_RE.match(l.text)
+        if CODE_RE.search(l.text) and not (lm and not re.search(r"[;{}]\s*$", l.text)):
+            res.append((l, "code", None)); prev = (l, "code")
+            continue
         if lm and len(l.text) < 400 and not FORM_RE.match(l.text):
-            res.append((l, "list", lm.group(1).strip()))
+            res.append((l, "list", lm.group(1).strip())); prev = (l, "list")
+            continue
+        # wrapped tail of a list item: previous row ran to the right margin, tight gap, not bold, not a marker
+        if (prev and prev[1] in ("list", "cont") and not l.bold and not FORM_RE.match(l.text)
+                and prev[0].bbox[2] >= tr - 0.2 * (tr - tl) and 0 <= l.bbox[1] - prev[0].bbox[3] < 0.8 * body_h
+                and abs(l.bbox[0] - prev[0].bbox[0]) <= 80 and (l.bbox[3] - l.bbox[1]) / body_h < 1.3):
+            res.append((l, "cont", None)); prev = (l, "cont")
             continue
         m = FORM_RE.match(l.text)
         if m and (ul is not None or len(l.text) < 40):
-            res.append((l, "form", (m.group(1).strip(), m.group(2).strip(), ul)))
+            res.append((l, "form", (m.group(1).strip(), m.group(2).strip(), ul))); prev = (l, "form")
             continue
         hr, cr = (l.bbox[3] - l.bbox[1]) / body_h, _char_w(l) / body_cw
         # height is the stable title signal; char-width alone is noisy on short words
@@ -185,6 +232,48 @@ def classify_lines(lines, ul_boxes):
             res.append((l, "heading", None))      # same-size bold line = run-in section label
         else:
             res.append((l, "text", None))
+        prev = (l, res[-1][1])
+    # OCR drops '//' and ';', so some code rows lose their tell-tale punctuation: a row that looks like a call or
+    # sits between code rows (tight vertical gap) is code too. Two passes let it spread along a block.
+    CALL = re.compile(r"\b[a-z]+[A-Z]\w*\s*\(|\b\w+\s*\(\s*\w+(?:,\s*\w+)*")
+    near = lambda a_, b_: 0 <= b_.bbox[1] - a_.bbox[3] < 2.2 * body_h
+    # runs of 1-3 plain rows flanked by code on both sides are (comment) code; so is a run just above a block
+    # whose rows start indented past the block's left edge (a '//' that OCR dropped)
+    soft = lambda e: e[1] in ("text", "heading") or (e[1] == "form" and e[2][2] is None)
+    i = 0
+    while i < len(res):
+        if not soft(res[i]):
+            i += 1; continue
+        j = i
+        while j + 1 < len(res) and soft(res[j + 1]) and near(res[j][0], res[j + 1][0]):
+            j += 1
+        run = res[i:j + 1]
+        above = res[i - 1] if i > 0 and res[i - 1][1] == "code" and near(res[i - 1][0], run[0][0]) else None
+        below = res[j + 1] if j + 1 < len(res) and res[j + 1][1] == "code" and near(run[-1][0], res[j + 1][0]) else None
+        if len(run) <= 3 and ((above and below) or
+                              (below and run[0][0].bbox[0] > below[0].bbox[0] + 12 and run[0][0].bbox[2] - run[0][0].bbox[0] > 40
+                               and not any(e[0].bold for e in run))):
+            for t in range(i, j + 1):
+                res[t] = (res[t][0], "code", None)
+        i = j + 1
+    for _ in range(2):
+        for i, (l, k, ex) in enumerate(res):
+            if k in ("code", "list", "title") or (k == "form" and ex[2] is not None):
+                continue
+            up = res[i - 1] if i > 0 and res[i - 1][1] == "code" and near(res[i - 1][0], l) else None
+            dn = res[i + 1] if i + 1 < len(res) and res[i + 1][1] == "code" and near(l, res[i + 1][0]) else None
+            if (up and dn) or ((up or dn) and CALL.search(l.text)):
+                res[i] = (l, "code", None)
+    # a bare "Label:" (no value, no underline) or a short line ending in ':' that introduces a list/code block
+    # is a section heading, not a blank form field. Resolved back-to-front so stacked labels chain.
+    for i in range(len(res) - 1, -1, -1):
+        l, k, ex = res[i]
+        nxt = res[i + 1][1] if i + 1 < len(res) else None
+        if k == "form" and not ex[1] and ex[2] is None:
+            if l.bold or nxt in ("list", "text", "code", "cont", "heading"):
+                res[i] = (l, "heading", None)
+        elif k == "text" and l.text.rstrip().endswith(":") and len(l.text) <= 80 and nxt in ("list", "code"):
+            res[i] = (l, "heading", None)
     return res
 
 
@@ -197,14 +286,27 @@ def build_elements(classified, page=0, source="classical"):
         if not cur:
             return
         ls = cur
-        t = {"title": "title", "heading": "heading", "text": "paragraph"}[cur_kind]
+        t = {"title": "title", "heading": "heading", "text": "paragraph", "code": "code"}[cur_kind]
+        if cur_kind == "code":
+            x0 = min(l.bbox[0] for l in ls)
+            cw = max(1.0, float(np.median([_char_w(l) for l in ls])))
+            txt = "\n".join(" " * int(round((l.bbox[0] - x0) / (2 * cw)) * 2) + l.text for l in ls)
+        else:
+            txt = " ".join(l.text for l in ls)
         els.append(Element(type=t, bbox=union([l.bbox for l in ls]), page=page,
-                           text=" ".join(l.text for l in ls),
+                           text=txt,
                            conf=float(np.mean([l.conf for l in ls])), source=source,
                            level={"title": 1, "heading": 2}.get(cur_kind)))
         cur, cur_kind = [], None
 
     for l, kind, extra in classified:
+        if kind == "cont":
+            if els and els[-1].type == "list_item":
+                e = els[-1]
+                e.text += " " + l.text
+                e.bbox = union([e.bbox, l.bbox])
+                continue
+            kind = "text"
         if kind == "list":
             flush()
             els.append(Element(type="list_item", bbox=l.bbox, page=page, text=extra, conf=l.conf, source=source))
@@ -216,8 +318,10 @@ def build_elements(classified, page=0, source="classical"):
             els.append(Element(type="form_field", bbox=bb, page=page, text=l.text, key=key, value=val,
                                conf=l.conf * (1.0 if ul else 0.7), source=source))
             continue
-        if cur and (kind != cur_kind or l.bbox[1] - cur[-1].bbox[3] > 0.9 * body_lh
-                    or l.bbox[0] > cur[-1].bbox[2] or l.bbox[2] < cur[-1].bbox[0]):
+        if cur and (kind != cur_kind
+                    or (kind == "code" and l.bbox[1] - cur[-1].bbox[3] > 2.2 * body_lh)
+                    or (kind != "code" and (l.bbox[1] - cur[-1].bbox[3] > 0.9 * body_lh
+                                            or l.bbox[0] > cur[-1].bbox[2] or l.bbox[2] < cur[-1].bbox[0]))):
             flush()
         cur.append(l); cur_kind = kind
     flush()
